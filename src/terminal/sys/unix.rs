@@ -1,9 +1,16 @@
 //! UNIX related logic for terminal manipulation.
 
+#[cfg(not(target_os = "aix"))]
 use crate::terminal::{
     sys::file_descriptor::{tty_fd, FileDesc},
     WindowSize,
 };
+#[cfg(all(target_os = "aix",feature = "libc"))]
+use crate::terminal::{
+    sys::file_descriptor::{FileDesc},
+    WindowSize,
+};
+
 #[cfg(feature = "libc")]
 use libc;
 #[cfg(feature = "libc")]
@@ -149,7 +156,7 @@ pub(crate) fn enable_raw_mode() -> io::Result<()> {
     }
 
     unsafe {
-        let mut termios: termios = mem::zeroed();
+        let mut termios: Termios = mem::zeroed();
 
         // Get current terminal attributes
         if libc::tcgetattr(STDIN_FILENO, &mut termios) != 0 {
@@ -359,7 +366,10 @@ fn tput_size() -> Option<(u16, u16)> {
 #[cfg(feature = "libc")]
 // Transform the given mode into an raw mode (non-canonical) mode.
 fn raw_terminal_attr(termios: &mut Termios) {
+    #[cfg(not(target_os = "aix"))]
     unsafe { cfmakeraw(termios) }
+    #[cfg(target_os = "aix")]
+    unsafe { let _ = cfmakeraw(termios); }
 }
 
 #[cfg(feature = "libc")]
