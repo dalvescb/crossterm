@@ -5,8 +5,10 @@ use crate::terminal::{
     WindowSize,
 };
 #[cfg(feature = "libc")]
+use libc;
+#[cfg(feature = "libc")]
 use libc::{
-    cfmakeraw, ioctl, tcgetattr, tcsetattr, termios as Termios, winsize, STDOUT_FILENO, TCSANOW,
+    cfmakeraw, ioctl, tcgetattr, tcsetattr, termios as Termios, winsize, STDIN_FILENO, STDOUT_FILENO, TCSANOW,
     TIOCGWINSZ,
 };
 use parking_lot::Mutex;
@@ -102,7 +104,7 @@ pub(crate) fn size() -> io::Result<(u16, u16)> {
     tput_size().ok_or_else(|| std::io::Error::last_os_error().into())
 }
 
-#[cfg(feature = "libc")]
+#[cfg(all(feature = "libc",not(target_os = "aix")))]
 pub(crate) fn enable_raw_mode() -> io::Result<()> {
     let mut original_mode = TERMINAL_MODE_PRIOR_RAW_MODE.lock();
     if original_mode.is_some() {
@@ -137,12 +139,65 @@ pub(crate) fn enable_raw_mode() -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(all(feature = "libc",target_os = "aix"))]
+pub(crate) fn enable_raw_mode() -> io::Result<()> {
+    let mut original_mode = TERMINAL_MODE_PRIOR_RAW_MODE.lock();
+
+    // If already in raw mode, return early
+    if original_mode.is_some() {
+        return Ok(());
+    }
+
+    unsafe {
+        let mut termios: termios = mem::zeroed();
+
+        // Get current terminal attributes
+        if libc::tcgetattr(STDIN_FILENO, &mut termios) != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Save original settings
+        let original_termios = termios;
+
+        // Modify for raw mode
+        // Input flags - turn off input processing
+        termios.c_iflag &= !(libc::IGNBRK | libc::BRKINT | libc::PARMRK | 
+                                libc::ISTRIP | libc::INLCR | libc::IGNCR | 
+                                libc::ICRNL | libc::IXON);
+
+        // Output flags - turn off output processing
+        termios.c_oflag &= !libc::OPOST;
+
+        // Control flags - set 8 bit chars
+        termios.c_cflag &= !(libc::CSIZE | libc::PARENB);
+        termios.c_cflag |= libc::CS8;
+
+        // Local flags - turn off canonical mode, echo, signals
+        termios.c_lflag &= !(libc::ECHO | libc::ECHONL | libc::ICANON | 
+                                libc::ISIG | libc::IEXTEN);
+
+        // Control characters - set read to return immediately
+        termios.c_cc[libc::VMIN] = 1;
+        termios.c_cc[libc::VTIME] = 0;
+
+        // Apply new settings
+        if libc::tcsetattr(STDIN_FILENO, TCSANOW, &termios) != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Save original mode only after successful switch
+        *original_mode = Some(original_termios);
+
+        Ok(())
+    }
+}
+
 /// Reset the raw mode.
 ///
 /// More precisely, reset the whole termios mode to what it was before the first call
 /// to [enable_raw_mode]. If you don't mess with termios outside of crossterm, it's
 /// effectively disabling the raw mode and doing nothing else.
-#[cfg(feature = "libc")]
+#[cfg(all(feature = "libc",not(target_os = "aix")))]
 pub(crate) fn disable_raw_mode() -> io::Result<()> {
     let mut original_mode = TERMINAL_MODE_PRIOR_RAW_MODE.lock();
     if let Some(original_mode_ios) = original_mode.as_ref() {
@@ -151,6 +206,22 @@ pub(crate) fn disable_raw_mode() -> io::Result<()> {
         // Keep it last - remove the original mode only if we were able to switch back
         *original_mode = None;
     }
+    Ok(())
+}
+
+#[cfg(all(feature = "libc",target_os = "aix"))]
+pub(crate) fn disable_raw_mode() -> io::Result<()> {
+    let mut original_mode = TERMINAL_MODE_PRIOR_RAW_MODE.lock();
+    if let Some(original) = original_mode.as_ref() {
+        unsafe {
+            if libc::tcsetattr(STDIN_FILENO, TCSANOW, original) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        // Clear the saved mode only after successful restore
+        *original_mode = None;
+    }
+
     Ok(())
 }
 
