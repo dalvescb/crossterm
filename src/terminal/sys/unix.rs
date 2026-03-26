@@ -299,7 +299,7 @@ fn tput_size() -> Option<(u16, u16)> {
 #[cfg(feature = "libc")]
 // Transform the given mode into an raw mode (non-canonical) mode.
 fn raw_terminal_attr(termios: &mut Termios) {
-    unsafe { cfmakeraw(termios) }
+    unsafe { cfmakeraw(termios); }
 }
 
 #[cfg(feature = "libc")]
