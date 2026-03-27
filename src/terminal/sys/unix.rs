@@ -1,13 +1,7 @@
 //! UNIX related logic for terminal manipulation.
 
-#[cfg(not(target_os = "aix"))]
 use crate::terminal::{
     sys::file_descriptor::{tty_fd, FileDesc},
-    WindowSize,
-};
-#[cfg(all(target_os = "aix",feature = "libc"))]
-use crate::terminal::{
-    sys::file_descriptor::{FileDesc},
     WindowSize,
 };
 
